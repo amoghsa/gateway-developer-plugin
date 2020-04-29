@@ -9,6 +9,7 @@ package com.ca.apim.gateway.cagatewayconfig.bundle.builder;
 import com.ca.apim.gateway.cagatewayconfig.beans.*;
 import com.ca.apim.gateway.cagatewayconfig.util.entity.EntityTypes;
 import com.ca.apim.gateway.cagatewayconfig.util.gateway.MappingProperties;
+import com.ca.apim.gateway.cagatewayconfig.util.paths.PathUtils;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.collections4.CollectionUtils;
 import org.w3c.dom.Document;
@@ -151,9 +152,8 @@ public class BundleEntityBuilder {
 
     private Entity getUniquePolicyEntity(final Entity entity, final String projectName, final String projectVersion, final AnnotatedEntity annotatedEntity) {
         String nameWithPath = entity.getName();
-        int index = nameWithPath.lastIndexOf("/");
-        String uniqueName = getUniqueName(projectName, projectVersion, annotatedEntity.getEntityType(), annotatedEntity.getEntityName());
-        String uniqueNameWithPath = index > -1 ? nameWithPath.substring(0, index + 1) + uniqueName : uniqueName;
+        String uniqueName = getUniqueName(projectName, projectVersion, annotatedEntity, nameWithPath);
+        String uniqueNameWithPath = PathUtils.extractPath(nameWithPath) + uniqueName;
 
         Element modifiedElement = (Element) entity.getXml().cloneNode(true);
         NodeList nodeList = modifiedElement.getElementsByTagName("l7:Name");
@@ -163,25 +163,26 @@ public class BundleEntityBuilder {
         return EntityBuilderHelper.getEntityWithMappings(entity.getType(), uniqueNameWithPath, entity.getId(), modifiedElement, entity.getMappingAction(), entity.getMappingProperties());
     }
 
-    private String getUniqueName(final String projectName, final String projectVersion, final String entityType, final String nameWithPath) {
+    private String getUniqueName(final String projectName, final String projectVersion, final AnnotatedEntity annotatedEntity, final String nameWithPath) {
         StringBuilder uniqueName = new StringBuilder(projectName);
-        int index = nameWithPath.lastIndexOf("/");
-        String entityName = nameWithPath.substring(index+1);
         uniqueName.append("-");
-        if (EntityTypes.ENCAPSULATED_ASSERTION_TYPE.equals(entityType)) {
+        if (EntityTypes.ENCAPSULATED_ASSERTION_TYPE.equals(annotatedEntity.getEntityType())) {
             uniqueName.append("encass");
-        } else if (EntityTypes.SERVICE_TYPE.equals(entityType)) {
+        } else if (EntityTypes.SERVICE_TYPE.equals(annotatedEntity.getEntityType())) {
             uniqueName.append("service");
         } else {
             uniqueName.append("policy");
         }
 
         uniqueName.append("-");
-        uniqueName.append(entityName);
+        uniqueName.append(PathUtils.extractName(annotatedEntity.getEntityName()));
+        uniqueName.append("-");
+        uniqueName.append(PathUtils.extractName(nameWithPath));
         uniqueName.append("-");
         uniqueName.append(projectVersion);
         return uniqueName.toString();
     }
+
 
     private List<Entity> getEntityDependencies(String annotatedEntityName, String annotatedEntityType, String policyNameWithPath, List<Entity> entities, Bundle bundle) {
         List<Entity> entityDependenciesList = new ArrayList<>();
