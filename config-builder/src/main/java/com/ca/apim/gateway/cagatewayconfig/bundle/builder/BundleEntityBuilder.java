@@ -8,10 +8,13 @@ package com.ca.apim.gateway.cagatewayconfig.bundle.builder;
 
 import com.ca.apim.gateway.cagatewayconfig.beans.*;
 import com.ca.apim.gateway.cagatewayconfig.util.entity.EntityTypes;
+import com.ca.apim.gateway.cagatewayconfig.util.gateway.MappingProperties;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.collections4.CollectionUtils;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -111,13 +114,29 @@ public class BundleEntityBuilder {
             }
         });
 
-        if(!annotatedEntities.isEmpty()) {
+        if (!annotatedEntities.isEmpty()) {
             Map<String, Element> annotatedElements = new LinkedHashMap<>();
             if (EntityBuilder.BundleType.DEPLOYMENT == bundleType) {
                 annotatedEntities.stream().forEach(annotatedEntity -> {
                     if (annotatedEntity.isBundleTypeEnabled()) {
                         List<Entity> entityList = getEntityDependencies(annotatedEntity.getEntityName(), annotatedEntity.getEntityType(), annotatedEntity.getPolicyName(), entities, bundle);
                         LOGGER.log(Level.FINE, "Annotated entity list : " + entityList);
+                        //Add the parent entities
+                        for (Entity entity : entities) {
+                            if (annotatedEntity.getPolicyName().equals(entity.getName())) {
+                                if (annotatedEntity.isReusableTypeEnabled()) {
+                                    entityList.add(entity);
+                                } else {
+                                    entityList.add(getUniquePolicyEntity(entity, bundleName, bundleVersion, annotatedEntity));
+                                }
+                            } else {
+                                int index = entity.getName().lastIndexOf("/");
+                                final String entityName = index > -1 ? entity.getName().substring(index + 1) : entity.getName();
+                                if (annotatedEntity.getEntityName().equals(entityName)) {
+                                    entityList.add(entity);
+                                }
+                            }
+                        }
                         annotatedElements.put(annotatedEntity.getBundleName(), bundleDocumentBuilder.build(document, entityList));
                     }
                 });
@@ -128,6 +147,40 @@ public class BundleEntityBuilder {
         Map<String, Element> bundles = new HashMap<>();
         bundles.put(bundleName + '-' + bundleVersion, bundleDocumentBuilder.build(document, entities));
         return bundles;
+    }
+
+    private Entity getUniquePolicyEntity(final Entity entity, final String projectName, final String projectVersion, final AnnotatedEntity annotatedEntity) {
+        String nameWithPath = entity.getName();
+        int index = nameWithPath.lastIndexOf("/");
+        String uniqueName = getUniqueName(projectName, projectVersion, annotatedEntity.getEntityType(), annotatedEntity.getEntityName());
+        String uniqueNameWithPath = index > -1 ? nameWithPath.substring(0, index + 1) + uniqueName : uniqueName;
+
+        Element modifiedElement = (Element) entity.getXml().cloneNode(true);
+        NodeList nodeList = modifiedElement.getElementsByTagName("l7:Name");
+        Node nameNode = nodeList.item(0);
+        nameNode.setTextContent(uniqueName);
+
+        return EntityBuilderHelper.getEntityWithMappings(entity.getType(), uniqueNameWithPath, entity.getId(), modifiedElement, entity.getMappingAction(), entity.getMappingProperties());
+    }
+
+    private String getUniqueName(final String projectName, final String projectVersion, final String entityType, final String nameWithPath) {
+        StringBuilder uniqueName = new StringBuilder(projectName);
+        int index = nameWithPath.lastIndexOf("/");
+        String entityName = nameWithPath.substring(index+1);
+        uniqueName.append("-");
+        if (EntityTypes.ENCAPSULATED_ASSERTION_TYPE.equals(entityType)) {
+            uniqueName.append("encass");
+        } else if (EntityTypes.SERVICE_TYPE.equals(entityType)) {
+            uniqueName.append("service");
+        } else {
+            uniqueName.append("policy");
+        }
+
+        uniqueName.append("-");
+        uniqueName.append(entityName);
+        uniqueName.append("-");
+        uniqueName.append(projectVersion);
+        return uniqueName.toString();
     }
 
     private List<Entity> getEntityDependencies(String annotatedEntityName, String annotatedEntityType, String policyNameWithPath, List<Entity> entities, Bundle bundle) {
@@ -159,11 +212,6 @@ public class BundleEntityBuilder {
                             }
                         }
                     }
-
-                    //Add the parent entities
-                    final List<Entity> parentEntities = entities.stream().filter(entity -> policyNameWithPath.equals(entity.getName()) || annotatedEntityName.equals(entity.getName())).collect(Collectors.toList());
-                    entityDependenciesList.addAll(parentEntities);
-
                     return entityDependenciesList;
                 }
             }
